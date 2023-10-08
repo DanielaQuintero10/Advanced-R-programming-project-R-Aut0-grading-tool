@@ -1,0 +1,1088 @@
+# Set language to English
+Sys.setlocale(category = "LC_CTYPE", locale = "en_US.UTF-8")
+
+# Specify required packages
+required_packages <- c("dplyr", "ggplot2", "tidyr", "renv", "shiny", "shinyjs",
+                       "Rcpp", "RSQLite", "R6", "DBI","openxlsx","tidyverse")
+
+# Install missing packages
+missing_packages <- setdiff(required_packages, rownames(installed.packages()))
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
+
+# Load required packages
+lapply(required_packages, library, character.only = TRUE)
+
+#renv::restore()
+
+# Connect to the SQLite database
+con <- dbConnect(RSQLite::SQLite(), "sqliteRAutoGrader.db")
+
+# -------------------------------------------------------------------------------------------#
+# ----------------------- R6 classes --------------------------------------------------------#
+
+# Define the R6 classes for each table
+# users - ok SQL working
+users <- R6Class("users",
+                 public = list(
+                   user_id = NULL,
+                   username = NULL,
+                   
+                   initialize = function(username) {
+                     self$username <- username
+                     
+                     # retrieve the last user_id from the users table
+                     result <- dbGetQuery(con, "SELECT user_id FROM users ORDER BY user_id DESC LIMIT 1")
+                     
+                     if (nrow(result) == 0) {
+                       # if there are no existing users, then user_id = 1
+                       self$user_id <- 1
+                     } else {
+                       # set the user_id to the last user_id plus one
+                       self$user_id <- result + 1
+                     }
+                     
+                     invisible(self)
+                   },
+                   
+                   insert = function() {
+                     query <- paste0("INSERT INTO users (user_id, username) VALUES (", 
+                                     self$user_id, ", '", self$username, "')")
+                     dbExecute(con, query)
+                   }
+                 )
+)
+
+# groups - Ok SQL working
+groups <- R6Class("groups",
+                  public = list(
+                    group_id = NULL,
+                    group_name = NULL,
+                    schedual_id = NULL,
+                    days_id = NULL,
+                    
+                    initialize = function(group_name, schedual_id, days_id) {
+                      self$group_name <- group_name
+                      self$schedual_id <- schedual_id
+                      self$days_id <- days_id
+                      groupid <- dbGetQuery(con, "SELECT group_id FROM groups ORDER BY group_id DESC LIMIT 1")
+                      if (nrow(groupid) == 0) {
+                        self$group_id <- 1
+                      } else {
+                        self$group_id <- groupid$group_id + 1
+                      }
+                      
+                      invisible(self)
+                    },
+                    
+                    insert = function() {
+                      query <- paste0("INSERT INTO groups 
+                                      (group_id, group_name, schedual_id, days_id) VALUES (", 
+                                      self$group_id, ", '", self$group_name, "', '", 
+                                      self$schedual_id, "', '", self$days_id, "')")
+                      dbExecute(con, query)
+                    }
+                  )
+)
+
+# days_of_week - Ok SQL working
+days_of_week <- R6Class("days_of_weeks",
+                        public = list(
+                          id_days = NULL,
+                          days = NULL,
+                          
+                          initialize = function(days) {
+                            self$days <- days
+                            dayid <- dbGetQuery(con, "SELECT id_days FROM days_of_week ORDER BY id_days DESC LIMIT 1")
+                            if (nrow(dayid) == 0) {
+                              self$id_days <- 1
+                            } else {
+                              self$id_days <- dayid + 1
+                            }
+                            
+                            invisible(self)
+                          },
+                          
+                          insert = function() {
+                            query <- paste0("INSERT INTO days_of_week (id_days, days) VALUES (", 
+                                            self$id_days, ", '", self$days, "')")
+                            dbExecute(con, query)
+                          }
+                        )
+)
+
+# tests - Ok SQL working
+tests <- R6Class("tests",
+                 public = list(
+                   test_id = NULL,
+                   test_topic = NULL,
+                   teach_id = NULL,
+                   active = 1,
+                   
+                   initialize = function(test_topic, teach_id, active = 1) {
+                     
+                     testid <- dbGetQuery(con, "SELECT test_id FROM tests ORDER BY test_id DESC LIMIT 1")$test_id
+                     if (length(testid) == 0) {
+                       self$test_id <- 1
+                     } else {
+                       self$test_id <- testid + 1
+                     }
+                     
+                     self$test_topic <- test_topic
+                     self$teach_id <- teach_id
+                     self$active <- active
+                     
+                     invisible(self)
+                   },
+                   
+                   insert = function() {
+                     query <- paste0("INSERT INTO tests (test_id, test_topic, teach_id, active) VALUES (", 
+                                     self$test_id, ", '", self$test_topic, "', '", self$teach_id, "', ", self$active, ")")
+                     dbExecute(con, query)
+                   }
+                 )
+)
+
+
+# teaching - ok, SQL connection working
+teaching <- R6Class("teaching",
+                    public = list(
+                      teach_id = NULL,
+                      user_id = NULL,
+                      course_id = NULL,
+                      group_id = NULL,
+                      id_days = NULL,
+                      schedule_id = NULL,
+                      
+                      initialize = function(user_id, course_id, group_id, id_days, 
+                                            schedule_id) {
+                        teach <- dbGetQuery(con, "SELECT teach_id FROM teaching ORDER BY teach_id DESC LIMIT 1")
+                        if (nrow(teach) == 0) {
+                          self$teach_id <- 1
+                        } else {
+                          self$teach_id <- teach$teach_id + 1
+                        }
+                        
+                        self$user_id <- user_id
+                        self$course_id <- course_id
+                        self$group_id <- group_id
+                        self$id_days <- id_days
+                        self$schedule_id <- schedule_id
+                        
+                        invisible(self)
+                      },
+                      
+                      insert = function() {
+                        query <- paste0("INSERT INTO teaching (teach_id, user_id, course_id, 
+                                       group_id, id_days, schedule_id) VALUES (", 
+                                        self$teach_id, ", ", self$user_id, ", '", self$course_id, "', '",
+                                        self$group_id, "', '", self$id_days, "', '", self$schedule_id, "')")
+                        
+                        dbExecute(con, query)
+                      }
+                    )
+)
+
+
+# courses - Ok SQL working
+courses <- R6Class("courses",
+                   public = list(
+                     course_id = NULL,
+                     course_name = NULL,
+                     initialize = function(course_name) {
+                       self$course_name <- course_name
+                       
+                       courseid <- dbGetQuery(con, "SELECT course_id FROM courses ORDER BY course_id DESC LIMIT 1")
+                       if (nrow(courseid) == 0) {
+                         self$course_id <- 1
+                       } else {
+                         self$course_id <- courseid$course_id + 1 #to get vector on lenght 1
+                       }
+                       
+                       
+                       invisible(self)
+                     },
+                     
+                     insert = function() {
+                       query <- paste0("INSERT INTO courses (course_id, course_name) VALUES (", 
+                                       self$course_id, ", '", self$course_name, "')")
+                       
+                       dbExecute(con, query)
+                     }
+                   )
+)
+# schedules - Ok SQL working
+schedules <- R6Class("schedules",
+                     public = list(
+                       schedule_id = NULL,
+                       start_time = "00:00",
+                       end_time = "17:30",
+                       initialize = function(start_time, end_time) {
+                         self$start_time <- start_time
+                         self$end_time <- end_time
+                         
+                         scheduleid <- dbGetQuery(con, "SELECT schedule_id 
+                                                  FROM schedules ORDER BY schedule_id DESC LIMIT 1")
+                         if (nrow(scheduleid) == 0) {
+                           self$schedule_id <- 1
+                         } else {
+                           self$schedule_id <- scheduleid + 1
+                         }
+                         
+                         invisible(self)
+                       },
+                       
+                       insert = function() {
+                         query <- paste0("INSERT INTO schedules (schedule_id, start_time, end_time) VALUES (",
+                                         self$schedule_id, ", '", self$start_time, "', '", self$end_time, "')")
+                         
+                         dbExecute(con, query)
+                       }
+                     )
+)
+
+# questions - Ok SQL connection working
+questions <- R6Class("questions",
+                     public = list(
+                       question_id = NULL,
+                       test_id = NULL,
+                       question_number = NULL,
+                       question_description = NULL,
+                       question_answer = NULL,
+                       score_points = NULL,
+                       type = NULL,
+                       
+                       initialize = function(test_id, question_number, question_description,
+                                             question_answer, score_points, type) {
+                         self$test_id <- test_id
+                         self$question_number <- question_number
+                         self$question_description <- question_description
+                         self$question_answer <- question_answer
+                         self$score_points <- score_points
+                         self$type <- type
+                         
+                         questid <- dbGetQuery(con, "SELECT question_id FROM questions 
+                                               ORDER BY question_id DESC LIMIT 1")
+                         if (nrow(questid) == 0) {
+                           self$question_id <- 1
+                         } else {
+                           self$question_id <- questid$question_id + 1
+                         }
+                         
+                         invisible(self)
+                       },
+                       
+                       insert = function() {
+                         query <- paste0("INSERT INTO questions (question_id, test_id, question_number, 
+                                       question_description, question_answer, score_points, type) VALUES (", 
+                                         self$question_id, ", ", self$test_id, ", '", self$question_number, "', '",
+                                         self$question_description, "', '", self$question_answer, "', '", 
+                                         self$score_points, "', '", self$type,"')")
+                         
+                         dbExecute(con, query)
+                       }
+                     )
+)
+
+
+#-----------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------
+
+# Shiny App
+if (interactive()) {
+  library("shiny")
+  library("shinyjs")
+  library("RSQLite")
+  library(tidyverse)
+  
+  con <- dbConnect(RSQLite::SQLite(), "sqliteRAutoGrader.db")
+  
+  shinyApp(
+    
+    ui <- fluidPage(
+      useShinyjs(),
+      h4(id = 'h1home', style = 'text-align: center;', '- Automatic R Grader tool 2023 -'),
+      h1(id = 'h1',style = "text-align: center;", "Welcome to the Automatic R grader management tool!"),
+      hr(),
+      
+#ok s# Dropdown to select the username
+      selectInput(
+        inputId = "username",
+        label = "Select your username:",
+        choices = c(dbGetQuery(con, "SELECT DISTINCT username FROM users")$username),
+        selected = "-- Please select your username"
+      ),
+      
+      # Button to continue
+      actionButton(
+        inputId = "continueBtn",
+        label = "Continue",
+        disabled = TRUE
+      ),
+      
+      # Hyperlink to register
+      p(HTML("<p id='text-register'>Are you new? 
+         <a href='#' id='register-link'>Register here</a></p>")),
+      # Username field (hidden by default)
+      shinyjs::hidden(
+        textInput("usernamenew", "Choose your username: ", value = ""),
+        actionButton(inputId = 'createusername', label = 'Submit')
+        
+      ),
+      # Tabset with 3 tabs, will show after clicking 'Continue'
+      uiOutput("tabset_ui")
+    ),
+    
+    # Define the server
+    server <- function(input, output, session) {
+      # Show/hide the Username field based on the register hyperlink click
+      shinyjs::onclick("register-link", {
+        shinyjs::toggle("usernamenew")
+        shinyjs::toggle('createusername')
+      })
+      
+      observeEvent(input$createusername, {
+        # Create a new instance of the 'users' class
+        new_user <- users$new(input$usernamenew)
+        
+        # Insert the new user record into the database
+        new_user$insert()
+        
+        # Show success message
+        showModal(modalDialog(
+          title = "Success",
+          "New user created successfully!"
+        ))
+        
+        # Clear the information entered
+        updateTextInput(session, "usernamenew", value = "")
+        
+        # Hide the fields again
+        shinyjs::hide("usernamenew")
+        shinyjs::hide("createusername")
+        
+        updateSelectInput(session, 'username', choices = 
+                            c(dbGetQuery(con, "SELECT DISTINCT username FROM users")$username))
+      })
+# ok e   
+# ok s
+      # Reactive expression to get the user_id from the selected username
+      user_id <- reactive({
+        if (input$username == "-- Please select your username") {
+          0
+        } else {
+          dbGetQuery(con, paste0("SELECT user_id FROM users WHERE username = '", input$username, "'"))$user_id
+        }
+      })
+      
+      # Enable continue button if username is selected
+      observeEvent(input$username, {
+        # Get the user_id for the selected username
+        user_id_val <- user_id()
+        
+        # Debugging statement
+        print(user_id_val)
+        
+        # Enable the continue button only if the user_id is not 0
+        if (user_id_val != 0) {
+          shinyjs::enable("continueBtn")
+        } else {
+          shinyjs::disable("continueBtn")
+        }
+        print(input$username)
+      })
+      
+      # When the continue button is clicked, show the tabset
+      observeEvent(input$continueBtn, {
+        hide("h1")
+        hide("text-register")
+        hide("register-link")
+        hide("username")
+        hide("continueBtn")
+        hide("usernamenew")
+        hide('createusername')
+        output$tabset_ui <- renderUI({
+          sidebarLayout(
+            sidebarPanel(
+              h3(id = "welcome-msg", "Welcome, ", input$username),
+              selectInput(
+                inputId = "courses",
+                label = "Select one of your courses:",
+                choices = dbGetQuery(con, paste0("
+                      SELECT DISTINCT course_name FROM courses 
+                      JOIN teaching ON teaching.course_id = courses.course_id
+                      JOIN users ON users.user_id = teaching.user_id
+                      WHERE users.username = '", input$username, "'"
+                ))$course_name
+              ),
+              checkboxGroupInput(
+                inputId = 'groups',
+                label = 'Select the group(s) for analysis:',
+                choices = NULL
+              ),
+              selectInput(
+                inputId = "tests",
+                label = "Select the test:",
+                choices = NULL
+              )
+            ),
+            mainPanel(
+              tabsetPanel(
+                id = "tabset",
+                # Tab 1
+                tabPanel(title = "CREATE",
+                         br(),
+                         tabsetPanel(
+                           tabPanel(
+                             title = 'NEW COURSE',
+                             h3(id = "h3newcourse", 'Create a new course'),
+                             hr(),
+                             p(id = "h5ncdescription", 'Are you teaching a new course? In this section you will be able 
+                                to add a new course to your courses list.', br(),
+                               'Please only use this option if the course you want add is NOT 
+                               available in your current courses list.'),
+                             textInput(inputId = 'newcourse', label = 'Course name: '),
+                             selectInput(inputId = 'grouplist', label = 'Choose group: ', choices = 
+                                           dbGetQuery(con, paste0("SELECT * FROM groups"))$group_name),
+                             selectInput(inputId = 'dayclass', label = 'Teaching day: ', choices = 
+                                           dbGetQuery(con, paste0("SELECT * FROM days_of_week"))$days
+                             ),
+                             selectInput(inputId = 'schduletime', label = 'Choose the schedule of the course:',
+                                         choices = dbGetQuery(con, paste0("SELECT schedule_id, start_time || ' - ' || end_time 
+                                                                          AS time_range FROM schedules"))$time_range
+                                         ),
+                             # Button                                         
+                             actionButton(inputId = 'newcourseteach', label = 'Save')
+                             
+                           ),
+                           
+                           tabPanel(
+                             title = "NEW GROUP",
+                             h3(id = "h3newgroup", 'Create a new group'),
+                             hr(),
+                             p(id = "h5ncdescription", 'In this section you will be able to
+                                 add a new group to an existing course from your courses list.', br(),
+                               'Please only use this option if the course already exists and you just 
+                               want to assign a new group to it.'),
+                             hr(),
+                             selectInput(inputId = 'slctcourseBtn', label = 'Select the course: ',
+                                         choices = dbGetQuery(con, paste0("
+                                   SELECT DISTINCT course_name FROM courses JOIN teaching 
+                                   ON teaching.course_id = courses.course_id JOIN users 
+                                   ON users.user_id = teaching.user_id WHERE users.username = '", 
+                                                                          input$username, "'"))$course_name),
+                             fluidRow(
+                               column(
+                                 width = 6,
+                                 selectInput(inputId = 'newgroupsBtn', label = 'Select the group to add: ',
+                                             choices = dbGetQuery(con, paste0("SELECT group_name 
+                                                                          FROM groups WHERE group_id>0"))$group_name)
+                               ),
+                               column(
+                                 width = 6,
+                                 selectInput(inputId = 'newdayBtn', label = 'Select the day: ', choices = 
+                                               dbGetQuery(con, paste0("SELECT days FROM days_of_week 
+                                                                      WHERE id_days>0"))$days)
+                                 )
+                             ),
+                             selectInput(inputId = 'grouptimes', label = 'Choose the schedule of the group:',
+                                         choices = dbGetQuery(con, paste0("SELECT schedule_id, start_time || ' - ' || end_time 
+                                                                          AS time_range FROM schedules"))$time_range
+                                         ),
+                             
+                             #button
+                             actionButton(inputId = 'newgroupBtn', label = 'Save')
+                            
+                           ),
+                           
+                           tabPanel(
+                             title = "NEW TEST",
+                             h3(id = "h3newtest", 'Create a new test'),
+                             hr(),
+                             p(id = "h5ncdescription", 'In this section you will be able to
+                                 add a new test and assigned it to the course and groups of your choice.', br(),
+                               'You can assign one test to one course but the test can be assigned to many groups 
+                               if applicable.'),
+                             
+                             # Creation form
+                             fluidRow(
+                               column(
+                                 width = 6,
+                                 selectInput(
+                                   inputId = "courses2",
+                                   label = "Select the course to assign the test: ",
+                                   choices = dbGetQuery(con, paste0("
+                                   SELECT DISTINCT course_name FROM courses JOIN teaching 
+                                   ON teaching.course_id = courses.course_id JOIN users 
+                                   ON users.user_id = teaching.user_id WHERE users.username = '", 
+                                                                    input$username, "'"))$course_name
+                                 )
+                               ),
+                               column(
+                                 width = 6,
+                                 checkboxGroupInput(
+                                   inputId = 'groups2',
+                                   label = 'Select the group(s) that had the test:',
+                                   choices = NULL
+                                 )
+                               )
+                             ),
+                             textInput(inputId = "testtopic", label = "Test topic/name", value = ""),
+                             br(),
+                             p("Please input the questions corresponding to the test."
+                             ),
+                            
+                             hr(),
+                             
+                             selectInput(inputId ='typequestion', label = 'Choose the type of question',
+                                           choices = c('Single choice answer', 'R code answer')),
+                             fluidRow(
+                               column(
+                                 width = 6,
+                                 numericInput(inputId = "questnumber", 
+                                              label = "Question number: ", 
+                                              value = 1, min = 1, max = 99)
+                               ),
+                               column(
+                                 width = 6,
+                                 numericInput(inputId = "questpoints", 
+                                              label = "Points if correct ", 
+                                              value = 0, min = 0, max = 500)
+                               )
+                             ),
+                             fluidRow(
+                               column(
+                                 width = 6,
+                                 textInput(inputId = "questanswer", 
+                                           label = "Question answer: ", value = "")
+                               ),
+                               column(
+                                 width = 6,
+                                 textInput(inputId = "question", label = "Question description: ", value = "")
+                               )
+                             ),
+                             
+                             # Button
+                             
+                             actionButton(inputId = "addQuestionBtn", label = "Save/Add next question")
+                             
+                           )
+                         )
+                ),
+                
+                # Tab 2
+                tabPanel(title = "EXPORT",
+                         hr(),
+                         "Here you can see how many students took the test, ",
+                         "and You can Export all students results into excel file.",
+                         hr(),
+
+                         # Add the download handler
+                         downloadButton("download_excel", "Download Excel"),
+                        
+                         # Output table for test results
+                         tableOutput("test_results_table")
+                         
+                         ),
+                # Tab 3
+                tabPanel(
+                        title = "RESULTS",
+                        hr(),
+                        "Here you can see Analysis for students and the course ",
+                        hr(),
+                        column(width = 6, plotOutput("top5")),
+                        column(width = 6, plotOutput("dev5")),
+                        column(width = 6, plotOutput("groups")),
+                        column(width = 6, plotOutput("questions")) #
+                    )
+              )
+            )
+          )
+        })
+      })
+#ok e
+    
+####### Buttons - CREATE
+#ok # button New course - aka 'Save' id= 'newcourseteach'
+      observeEvent(input$newcourseteach, {
+        # Get the selected options
+        course_name <- input$newcourse
+        group_name <- input$grouplist
+        teaching_day <- input$dayclass
+        schedule_time <- input$schduletime
+        
+        # Create a new instance of the 'courses' class
+        new_course <- courses$new(course_name)
+        
+        # Insert the new course record into the database
+        new_course$insert()
+        
+        # Extract the start_time and end_time from the selected schedule_time
+        selected_schedule <- strsplit(schedule_time, " - ")[[1]]
+        start_time <- selected_schedule[1]
+        end_time <- selected_schedule[2]
+        
+        # Get the course_id for the selected course_name
+        course_id <- new_course$course_id
+        
+        # Get the group_id for the selected group_name
+        group_id <- dbGetQuery(con, paste0("SELECT group_id FROM groups WHERE group_name = '", group_name, "'"))$group_id
+        
+        # Get the schedule_id for the selected start_time and end_time
+        schedule_id <- dbGetQuery(con, paste0("SELECT schedule_id FROM schedules WHERE start_time = '", start_time, "' AND end_time = '", end_time, "'"))$schedule_id
+        
+        # Get the id_days for the selected teaching_day
+        id_days <- dbGetQuery(con, paste0("SELECT id_days FROM days_of_week WHERE days = '", teaching_day, "'"))$id_days
+        
+        # Create a new instance of the 'teaching' class
+        new_teaching <- teaching$new(user_id(), course_id, group_id, id_days, schedule_id)
+        
+        # Insert the new teaching record into the database
+        new_teaching$insert()
+        
+       # Show a success message
+        showModal(modalDialog(
+          title = "Success",
+          "New course created successfully!"
+        ))
+        # Clear the information entered
+        updateTextInput(session, "newcourse", value = "")
+        updateSelectInput(session, "grouplist", selected = "")
+        updateSelectInput(session, "dayclass", selected = "")
+        updateSelectInput(session, "schduletime", selected = "")
+        
+        updateData()
+        
+        
+      })
+     
+###### Button New group = ok
+      observeEvent(input$newgroupBtn, {
+        # Get the selected options
+        course_name1 <- input$slctcourseBtn
+        group_name1 <- input$newgroupsBtn
+        teaching_day1 <- input$newdayBtn
+        schedule_time1 <- input$grouptimes
+        
+        # Get the course_id for the selected course_name
+        course_id1 <- dbGetQuery(con, paste0("SELECT course_id FROM courses WHERE course_name = '", 
+                                             course_name1, "'"))$course_id
+        
+        # Get the group_id for the selected group_name
+        group_id1 <- dbGetQuery(con, paste0("SELECT group_id FROM groups WHERE group_name = '", 
+                                            group_name1, "'"))$group_id
+        
+        # Get the schedule_id for the selected schedule_time
+        selected_schedule1 <- strsplit(schedule_time1, " - ")[[1]]
+        start_time1 <- selected_schedule1[1]
+        end_time1 <- selected_schedule1[2]
+        schedule_id1 <- dbGetQuery(con, paste0("SELECT schedule_id FROM schedules WHERE start_time = '", 
+                                               start_time1, "' AND end_time = '", end_time1, "'"))$schedule_id
+        
+        # Get the id_days for the selected teaching_day
+        id_days1 <- dbGetQuery(con, paste0("SELECT id_days FROM days_of_week WHERE days = '", 
+                                           teaching_day1, "'"))$id_days
+        
+        # Create a new instance of the 'teaching' class
+        new_teaching <- teaching$new(user_id(), course_id1, group_id1, id_days1, schedule_id1)
+        
+        # Insert the new teaching record into the database
+        new_teaching$insert()
+        
+        # Create a new instance of the 'groups' class
+        new_group <- groups$new(group_name1, schedule_id1, id_days1)
+        
+        # Insert the new group record into th e database
+        new_group$insert()
+        
+        # Show a success message
+        showModal(modalDialog(
+          title = "Success",
+          "New group created successfully! Please restart the app."
+        ))
+        
+        #clear inputs
+        updateSelectInput(session, "slctcourseBtn", selected = "")
+        updateSelectInput(session, "newgroupsBtn", selected = "")
+        updateSelectInput(session, "newdayBtn", selected = "")
+        updateSelectInput(session, "grouptimes", selected = "")
+        
+      })
+      
+      
+      # Button New test
+###### Button Save/submit another question
+      observeEvent(input$addQuestionBtn, {
+        # Find course_id based on input$courses2
+        courseid <- dbGetQuery(con, paste0("SELECT course_id FROM courses WHERE course_name = '", 
+                                            input$courses2, "'"))$course_id
+        
+        # Loop for groups (when user selects more than 1 group to add the test)
+        for (group_str in input$groups2) {
+          #user_id
+          userid <- dbGetQuery(con, paste0("SELECT user_id FROM users WHERE username = '", input$username, "'"))$user_id
+          print(userid)
+          # Find teaching_id based on input$courses2, user_id in current session, input$groups2
+          teachid <- dbGetQuery(con, paste0("SELECT teach_id FROM group_info_view WHERE user_id = '", userid, "'
+                                  AND course_name = '", input$courses2, "'
+                                  AND group_info = '", group_str, "'"))$teach_id
+          
+          print(teachid)
+          testtopic1 <- input$testtopic
+          print(testtopic1)
+          
+          # Check if the test already exists
+          existing_test <- dbGetQuery(con, paste0("SELECT test_id FROM tests WHERE test_topic = '", testtopic1, "'
+                                            AND teach_id = '", teachid, "'"))
+          if (nrow(existing_test) == 0) {
+            # Create a new instance of the 'tests' class
+            new_test <- tests$new(testtopic1, teachid)
+            
+            # Insert the new test record into the database
+            new_test$insert()
+            
+            # Save the test_id of the newly created test row
+            id_currtest <- new_test$test_id
+            
+            #dbExecute(con, paste0("UPDATE tests SET active = 1 WHERE test_id = '", id_currtest, "'"))
+          } else {
+            # Test already exists, use the existing test_id
+            id_currtest <- existing_test$test_id[1]
+          }
+          
+          
+          # Determine the type based on input$typequestion
+          if (input$typequestion == "Single choice answer") {
+            type <- "MCQ"
+          } else {
+            type <- "TXT"
+          }
+          
+          # Create a new instance of the 'questions' class
+          new_question <- questions$new(id_currtest, input$questnumber, input$question, input$questanswer, input$questpoints, type)
+          
+          # Insert the new question record into the database
+          new_question$insert()
+          
+          # If typequestion is 'Single choice answer', insert question_id into choices table
+          if (input$typequestion == "Single choice answer") {
+            # Insert question_id into choices table
+            dbExecute(con, paste0("INSERT INTO choices (question_id, answer_description) 
+                                  VALUES ('", new_question$question_id, "', '", new_question$question_answer, "')"))
+          }
+        }
+        
+        # Clear the information entered
+        updateSelectInput(session, "typequestion", selected = "")
+        updateNumericInput(session, "questnumber", value = 1)
+        updateNumericInput(session, "questpoints", value = 0)
+        updateTextInput(session, "questanswer", value = "")
+        updateTextInput(session, "question", value = "")
+      })
+      
+      
+########## end buttons ######
+      
+################################## side bar panel 
+# ok start #      
+      updateData <- function() {
+        # Get the latest data from the database
+        
+        # Update the choices of the courses selectInput, sidebar panel
+        course_choices <- dbGetQuery(con, "SELECT DISTINCT course_name FROM courses")
+        updateSelectInput(session, "courses", choices = dbGetQuery(con, paste0("
+                      SELECT DISTINCT course_name FROM courses 
+                      JOIN teaching ON teaching.course_id = courses.course_id
+                      JOIN users ON users.user_id = teaching.user_id
+                      WHERE users.username = '", input$username, "'"
+        ))$course_name)
+        
+        # Update courses choices on CREATE - new group
+        updateSelectInput(session,'slctcourseBtn',
+                    choices = dbGetQuery(con, paste0("
+                                   SELECT DISTINCT course_name FROM courses JOIN teaching 
+                                   ON teaching.course_id = courses.course_id JOIN users 
+                                   ON users.user_id = teaching.user_id WHERE users.username = '", 
+                                                     input$username, "'"))$course_name)
+        
+        
+                          
+      }
+      
+      
+      # Define a function to retrieve test IDs based on the selected course and groups
+      getTestIDs <- function(course, groups) {
+        # Get the course ID
+        course_id <- dbGetQuery(con, paste0("
+    SELECT DISTINCT course_id FROM courses WHERE course_name = '",
+                                            course, "'"))$course_id
+        
+        # Get the teach IDs for the selected groups
+        teach_ids <- dbGetQuery(con, paste0("SELECT teach_id FROM group_info_view WHERE group_info IN ('", 
+                                            paste(groups, collapse = "','"), "')"))$teach_id
+        
+        # Get the test IDs associated with the teach IDs
+        test_ids <- dbGetQuery(con, paste0("SELECT DISTINCT test_id FROM tests
+                                      WHERE teach_id IN (", paste(teach_ids, collapse = ","), ")"))$test_id
+        
+        return(test_ids)
+      }
+      
+      # Update the checkbox options (sidebar panel) whenever the courses selection changes
+      observeEvent(input$courses, {
+        # Reset the selected value of the tests dropdown if the previous selection is not available in the 
+        # updated choices
+        if (!is.null(input$tests) && !(input$tests %in% dbGetQuery(con, paste0("
+                SELECT DISTINCT test_topic 
+                FROM tests WHERE test_id IN (", paste(getTestIDs(input$courses, input$groups), collapse = ","), ")"))$test_topic)) {
+          updateSelectInput(session, "tests", selected = NULL)
+        }
+        
+        # Get the user_id for the selected username
+        user_id_val <- user_id()
+        
+        # Get the group names for the selected course
+        group_names <- dbGetQuery(con, paste0("SELECT group_info FROM group_info_view WHERE user_id = '", 
+                                              user_id_val, "'AND course_name = '", input$courses, "'"))$group_info
+        
+        # Update the checkbox options
+        updateCheckboxGroupInput(session, "groups", choices = group_names)
+      })
+      
+      
+      # Get the test IDs for the selected course
+      test_ids <- reactive({
+        req(input$courses)
+        
+        course_id <- dbGetQuery(con, paste0("
+          SELECT DISTINCT course_id FROM courses WHERE course_name = '",
+                                            input$courses, "'"))$course_id
+        
+        teach_ids <- dbGetQuery(con, paste0("
+          SELECT DISTINCT teach_id FROM group_info_view
+          WHERE user_id = '", user_id, "'
+          AND course_name = '", input$courses, "' 
+          AND group_info = '", input$groups, "'"))$teach_id
+        
+        dbGetQuery(con, paste0("
+          SELECT DISTINCT test_id FROM tests
+          WHERE teach_id IN (", paste(teach_ids, collapse = ","), ")"))$test_id
+      })
+      
+      # Update the tests dropdown whenever the groups selection changes
+      observeEvent(input$groups, {
+        # Get the selected groups
+        selected_groups <- input$groups
+        
+        # Check if multiple groups are selected
+        if (length(selected_groups) > 1) {
+          # Get the teach_ids for the selected groups
+          teach_ids <- dbGetQuery(con, paste0("SELECT teach_id FROM group_info_view WHERE group_info IN ('", 
+                                              paste(selected_groups, collapse = "','"), "')"))$teach_id
+          
+          # Get the test topics that are common to all the selected teach_ids
+          common_test_topics <- dbGetQuery(con, paste0("SELECT test_topic FROM tests WHERE teach_id IN (",
+                                                       paste(teach_ids, collapse = ","), ") GROUP BY test_topic HAVING COUNT(DISTINCT teach_id) = ",
+                                                       length(selected_groups)))$test_topic
+          
+          # Update the tests dropdown with the common test topics
+          updateSelectInput(session, "tests", choices = common_test_topics)
+        } else {
+          # If only one group is selected, show all the test topics associated with that group
+          teach_id <- dbGetQuery(con, paste0("SELECT teach_id FROM group_info_view WHERE group_info = '", selected_groups, "'"))$teach_id
+          
+          test_topics <- dbGetQuery(con, paste0("SELECT test_topic FROM tests WHERE teach_id = ", teach_id))$test_topic
+          
+          # Update the tests dropdown with the test topics
+          updateSelectInput(session, "tests", choices = test_topics)
+        }
+      })
+      
+# ok end #    
+      
+      # Update the drop-down options for groups (CREATE tab) whenever the courses selection changes
+      observeEvent(input$courses2, {
+        # Get the user_id for the selected username
+        user_id_val2 <- user_id()
+        
+        # Get the group names for the selected course
+        group_names2 <- dbGetQuery(con, paste0("SELECT group_info FROM group_info_view WHERE user_id = '", 
+                                               user_id_val2, "'AND course_name = '", input$courses2, "'"))$group_info
+        # Update the dropdown options
+        updateCheckboxGroupInput(session, "groups2", choices = group_names2)
+      })
+      #
+      
+      
+      ############ Tab 2 
+      
+      output$test_results_table <- renderTable({
+        # Run the SQL query to fetch the test results
+        query <- "
+      SELECT  t.test_id,test_topic as 'Test Topic',st.studentCount as 'Submitted Students' FROM tests t ,
+        (select  test_id, count( distinct student_id) as studentCount from submissions group by test_id ) as st
+         where 
+         st.test_id =  t.test_id
+         and 
+         t.test_id IN (
+                       SELECT DISTINCT q.test_id
+                      FROM questions q
+                      )  and  active = 1 and  t.test_id !=0;
+    "
+        results <- dbGetQuery(con, query)
+        
+        
+        
+        
+        # Return the results as a data frame
+        results
+      }  ) 
+      
+      
+      ### Export :
+      
+      # Download handler for exporting data
+      output$download_excel <- downloadHandler(
+        filename = function() {
+          # Set the filename for the exported Excel file
+          paste0("test_results_", Sys.Date(), ".xlsx")
+        },
+        content = function(file) {
+          
+          ## Select test and it's final grades
+          query <- "Select t.test_id,t.test_topic,sum(q.score_points) finalGrade
+                    from tests t,questions q
+                    where t.test_id = q.test_id
+                    and t.test_id != 0
+                    group by test_topic"
+          results_tests <- dbGetQuery(con, query)
+          
+          
+          query <- "select test_id,student_id,sum(evaluation) score from submissions
+                    group by test_id,student_id"
+          results_students <- dbGetQuery(con, query)
+          
+          
+          merged_df <- merge(results_tests, results_students, by = "test_id", all = TRUE)
+          merged_df <- transform(merged_df, score_ratio = (score / finalGrade) * 100)
+          
+        
+          merged_df <- merged_df %>%
+            select(-test_id, -finalGrade, -score)
+          
+          # Pivot the data frame
+          pivoted_df <- pivot_wider(
+            data = merged_df,
+            names_from = test_topic,
+            values_from = score_ratio,
+            values_fill = 0
+          )
+          
+        
+          
+          # Write the data to an Excel file
+
+          write.xlsx(pivoted_df, file, rowNames= FALSE)
+
+        }
+      )
+      
+      ###### End Tab2
+  
+      ##################################################################    
+      ###### Start Tab3
+      
+      #########################
+      query_top5 <- "select  student_id, ROUND((sum(evaluation)*1.0/ (select sum(score_points) from questions) * 100 ),2)  as ratio
+                   from submissions
+                  group by student_id
+                  having ratio > 50
+                  order by ratio desc
+                  LIMIT 3"
+      
+      data_top5 <- dbGetQuery(con, query_top5)
+      
+      #########################
+      query_dev5 <- "select  student_id, ROUND((sum(evaluation)*1.0/ (select sum(score_points) from questions) * 100 ),2)  as ratio
+                     from submissions
+                    group by student_id
+                    having ratio < 50
+                    order by ratio asc
+                    LIMIT 5"
+      
+      data_dev5 <- dbGetQuery(con, query_dev5)
+      
+      
+      #########################
+      query_groups <- "select  g.group_name as gr,ROUND((sum(evaluation)*1.0/ (select sum(score_points) from questions) * 100 ),2)  as ratio
+                   from submissions s,students st, groups g
+                   where st.student_id = s.student_id
+                   and g.group_id = st.group_id
+                   group by g.group_name
+                   order by ratio desc"
+      
+      data_groups <- dbGetQuery(con, query_groups)
+      #########################
+      query_questions <- "select CAST(test_id AS TEXT) || ' - ' || CAST(question_id AS TEXT) as 'test-question', count(question_id) as 'No. of Wrong Answers'
+                                  from submissions
+                                  where evaluation = 0
+                                  group by question_id
+                                  order by 2 desc
+                                  "
+      
+      data_questions <- dbGetQuery(con, query_questions)
+      
+      
+      
+      
+      
+      output$top5 <- renderPlot({
+        # Plot the data frame
+        barplot(data_top5$ratio, names.arg = data_top5$student_id,
+                main = "Top 3 Students",
+                xlab = "Student ID", ylab = "Total grade", ylim = c(0, 100), col = "lightblue")
+      
+        # Add value labels on top of the bars
+        text(x = barplot(data_top5$ratio, plot = FALSE), y = data_top5$ratio, labels = data_top5$ratio, pos = 3, cex = 0.8)
+      })
+      
+      output$dev5 <- renderPlot({
+        # Plot the data frame
+        barplot(data_dev5$ratio, names.arg = data_dev5$student_id,
+                main = "Students need development",
+                xlab = "Student ID", ylab = "Total grade", ylim = c(0, 100), col = "purple")
+        
+        # Add value labels on top of the bars
+        text(x = barplot(data_dev5$ratio, plot = FALSE), y = data_dev5$ratio, labels = data_dev5$ratio, pos = 3, cex = 0.8)
+      })
+      
+      
+      output$groups <- renderPlot({
+        # Plot the data frame
+        barplot(data_groups$ratio, names.arg = data_groups$gr,
+                main = "Does time of classes affect grades",
+                xlab = "Group Name", ylab = "Total grade", ylim = c(0, 100), col = "lightgreen")
+        
+        # Add value labels on top of the bars
+        text(x = barplot(data_groups$ratio, plot = FALSE), y = data_groups$ratio, labels = data_groups$ratio, pos = 3, cex = 0.8)
+      })
+      
+      output$questions <- renderPlot({
+        # Plot the data frame
+        barplot(data_questions$'No. of Wrong Answers', names.arg = data_questions$'test-question',
+                main = "What questions was hardest to pass",
+                xlab = 'No. of Wrong Answers', ylab = "test-question", xlim = c(0, 10), col = "orange",las = 2, horiz = TRUE)
+        
+        # Add value labels on top of the bars
+       # text(x = barplot(data_questions$'No. of Wrong Answers', plot = FALSE), y = data_questions$'No. of Wrong Answers', labels = data_questions$'No. of Wrong Answers', pos = 3, cex = 0.8)
+      })
+      
+      ###### End Tab3
+      
+      
+    }
+  )
+}
